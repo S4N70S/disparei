@@ -22,8 +22,15 @@ const srcDir = fileURLToPath(new URL('./src', import.meta.url))
 const nextConfig = {
   // Os packages do monorepo são consumidos como TypeScript-fonte.
   transpilePackages: ['@disparei/core', '@disparei/db', '@disparei/email'],
-  // Dependências server-only: fora do bundle do webpack.
-  serverExternalPackages: ['postgres', 'nodemailer'],
+  /*
+   * Sem `serverExternalPackages`.
+   *
+   * `postgres` e `nodemailer` já estiveram nessa lista, herdado de quando o
+   * projeto usava bullmq (que tem drivers opcionais e reclamava no bundling).
+   * Os dois são JavaScript puro e empacotam sem problema — deixá-los fora do
+   * bundle faz a função serverless depender de o node_modules da raiz do
+   * monorepo ser rastreado até o lambda, que é justamente onde isso quebra.
+   */
   experimental: {
     serverActions: { bodySizeLimit: '10mb' }, // import de CSV
   },
