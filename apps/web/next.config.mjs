@@ -16,6 +16,8 @@ if (existsSync(rootEnv)) {
   process.loadEnvFile(rootEnv)
 }
 
+const srcDir = fileURLToPath(new URL('./src', import.meta.url))
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Os packages do monorepo são consumidos como TypeScript-fonte.
@@ -24,6 +26,23 @@ const nextConfig = {
   serverExternalPackages: ['postgres', 'nodemailer'],
   experimental: {
     serverActions: { bodySizeLimit: '10mb' }, // import de CSV
+  },
+
+  /*
+   * O alias `@/` é declarado aqui, e não só no tsconfig.
+   *
+   * Num monorepo, o build da Vercel resolveu os `paths` do tsconfig em umas
+   * passagens de compilação e não em outras — client components e route
+   * handlers falhavam enquanto as páginas passavam. Declarar no bundler vale
+   * para todas as passagens e não depende de o tsconfig ser encontrado a
+   * partir do diretório em que o build foi disparado.
+   */
+  webpack: (config) => {
+    config.resolve.alias = { ...config.resolve.alias, '@': srcDir }
+    return config
+  },
+  turbopack: {
+    resolveAlias: { '@/*': './src/*' },
   },
 }
 
