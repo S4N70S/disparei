@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@disparei/db": ["./packages/db/src/index.ts"],
+      "@disparei/core": ["./packages/core/src/index.ts"],
+      "@disparei/email": ["./packages/email/src/index.ts"]
+    }
+  },
+  "include": ["**/*.ts"]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "disparei",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Plataforma de outbound para prospecção ativa por e-mail",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=@disparei/web",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "doctor": "tsx scripts/doctor.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "db:generate": "npm run generate --workspace=@disparei/db",
+    "db:migrate": "npm run migrate --workspace=@disparei/db",
+    "db:studio": "npm run studio --workspace=@disparei/db"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

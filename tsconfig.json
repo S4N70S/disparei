@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@disparei/db": ["./packages/db/src/index.ts"],
+      "@disparei/db/*": ["./packages/db/src/*"],
+      "@disparei/core": ["./packages/core/src/index.ts"],
+      "@disparei/core/*": ["./packages/core/src/*"],
+      "@disparei/email": ["./packages/email/src/index.ts"],
+      "@disparei/email/*": ["./packages/email/src/*"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "vitest.config.ts"]
+}
