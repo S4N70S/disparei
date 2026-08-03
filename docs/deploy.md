@@ -42,7 +42,8 @@ Settings → Environment Variables, para **Production** e **Preview**:
 | `APP_URL` | `https://app.budsmeet.com.br` |
 | `INBOUND_DOMAIN` | `inbound.budsmeet.com.br` |
 | `RESEND_API_KEY` | Resend → API Keys |
-| `RESEND_WEBHOOK_SECRET` | Resend → Webhooks → signing secret |
+| `RESEND_WEBHOOK_SECRET` | Resend → webhook de **eventos** → signing secret |
+| `RESEND_INBOUND_WEBHOOK_SECRET` | Resend → webhook de **inbound** → signing secret |
 | `MAX_SENDS_PER_TICK` | `3` |
 
 > `ENCRYPTION_KEY` e `TOKEN_SECRET` precisam ser **idênticos** aos do `.env` local. São eles que cifram as credenciais SMTP e assinam os tokens de `Reply-To`. Se mudarem, as caixas já cadastradas param de decifrar e toda resposta recebida vira token inválido — silenciosamente.
@@ -83,6 +84,10 @@ create extension if not exists pg_cron;
 create extension if not exists pg_net;
 ```
 
+> Rode este bloco **antes** do `cron.schedule`. Sem ele o Postgres responde
+> `schema "cron" does not exist` — a extensão vem desabilitada por padrão e é
+> ela que cria o schema.
+
 ```sql
 select cron.schedule(
   'disparei-tick',
@@ -122,7 +127,13 @@ Só depois do app publicado:
 | `https://app.budsmeet.com.br/api/webhooks/resend` | `email.delivered`, `email.bounced`, `email.complained`, `email.opened`, `email.clicked` |
 | `https://app.budsmeet.com.br/api/webhooks/inbound` | `email.received` |
 
-Copie o signing secret para `RESEND_WEBHOOK_SECRET` e faça redeploy.
+O Resend gera um signing secret **por webhook**. Copie cada um para a sua
+variável — `RESEND_WEBHOOK_SECRET` para o de eventos e
+`RESEND_INBOUND_WEBHOOK_SECRET` para o de inbound — e faça redeploy.
+
+Usar o mesmo valor nos dois faz um dos endpoints rejeitar toda entrega como
+assinatura inválida, e a falha é silenciosa: o Resend registra erro de
+entrega e a cadência simplesmente nunca para.
 
 ---
 

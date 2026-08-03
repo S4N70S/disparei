@@ -43,7 +43,9 @@ function toArray(value: string[] | string | undefined): string[] {
 export async function POST(request: Request) {
   const raw = await request.text()
 
-  const secret = env().RESEND_WEBHOOK_SECRET
+  // O Resend gera um secret por webhook: o do inbound é diferente do de
+  // eventos. O fallback cobre quem usa o mesmo valor nos dois.
+  const secret = env().RESEND_INBOUND_WEBHOOK_SECRET || env().RESEND_WEBHOOK_SECRET
   if (secret) {
     const valid = verifySvixSignature(
       raw,

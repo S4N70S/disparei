@@ -12,8 +12,16 @@ const schema = z.object({
   INBOUND_DOMAIN: z.string().min(3),
   /** Protege o endpoint de cron. Sem ele, qualquer um dispara seus envios. */
   CRON_SECRET: z.string().min(16).optional(),
-  /** Segredo do webhook do Resend (Svix), para validar a assinatura. */
+  /**
+   * Segredo do webhook de eventos de envio (Svix).
+   *
+   * O Resend gera um secret POR webhook. Como cadastramos dois endpoints
+   * (eventos e inbound), são dois valores distintos — usar um só faria o
+   * segundo endpoint rejeitar toda entrega como assinatura inválida.
+   */
   RESEND_WEBHOOK_SECRET: z.string().optional(),
+  /** Segredo do webhook de recebimento. Se ausente, cai no acima. */
+  RESEND_INBOUND_WEBHOOK_SECRET: z.string().optional(),
   /**
    * Necessária para buscar o corpo das respostas: o webhook `email.received`
    * entrega só metadados. Sem ela a resposta é gravada sem texto e a

@@ -26,6 +26,7 @@ const EXPECTED = [
   'CRON_SECRET',
   'RESEND_API_KEY',
   'RESEND_WEBHOOK_SECRET',
+  'RESEND_INBOUND_WEBHOOK_SECRET',
 ] as const
 
 export async function GET() {
