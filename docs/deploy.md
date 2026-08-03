@@ -47,6 +47,19 @@ Settings → Environment Variables, para **Production** e **Preview**:
 
 > `ENCRYPTION_KEY` e `TOKEN_SECRET` precisam ser **idênticos** aos do `.env` local. São eles que cifram as credenciais SMTP e assinam os tokens de `Reply-To`. Se mudarem, as caixas já cadastradas param de decifrar e toda resposta recebida vira token inválido — silenciosamente.
 
+### Por que existe uma `optionalDependencies` estranha em `apps/web/package.json`
+
+`@tailwindcss/oxide-linux-x64-gnu` está declarada explicitamente por causa do
+[bug #4828 do npm](https://github.com/npm/cli/issues/4828): o lockfile gerado
+no macOS registra só o binário nativo do macOS. Na Vercel, que builda em Linux
+x64, o build quebrava com `Cannot find native binding` ao processar o CSS.
+
+Declarar como opcional resolve sem efeito colateral — o npm ignora o pacote em
+plataformas que não batem com `os`/`cpu`, então no macOS nada muda.
+
+**Se um dia atualizar o Tailwind**, atualize essa versão junto; ela precisa
+acompanhar a do `@tailwindcss/oxide`.
+
 ### Domínio
 
 Settings → Domains → `app.budsmeet.com.br`. Na Hostinger:
