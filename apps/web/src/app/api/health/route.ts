@@ -1,3 +1,4 @@
+import { createHash, createHmac } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { env } from '@/lib/env'
 
@@ -48,6 +49,29 @@ export async function GET() {
     envError = (error as Error).message
   }
 
+  /*
+   * Impressão digital dos segredos, para comparar ambientes sem expor valores.
+   *
+   * "Senha incorreta" no painel pode ser tanto a senha digitada errada quanto
+   * um valor diferente entre o .env local e a Vercel — e como as variáveis são
+   * Sensitive, não dá para ler de volta e conferir.
+   *
+   * O digest passa pelo HMAC com TOKEN_SECRET antes do hash, então não é
+   * reversível nem sujeito a força bruta sem conhecer o segredo do servidor.
+   */
+  const fingerprint = (value: string | undefined): string | null => {
+    if (!value || !envValid) return null
+    const mac = createHmac('sha256', process.env.TOKEN_SECRET!).update(value).digest()
+    return createHash('sha256').update(mac).digest('hex').slice(0, 12)
+  }
+
+  const fingerprints = {
+    APP_PASSWORD: fingerprint(process.env.APP_PASSWORD),
+    ENCRYPTION_KEY: fingerprint(process.env.ENCRYPTION_KEY),
+    CRON_SECRET: fingerprint(process.env.CRON_SECRET),
+    TOKEN_SECRET: fingerprint(process.env.TOKEN_SECRET),
+  }
+
   return NextResponse.json(
     {
       ok: envValid,
@@ -60,6 +84,8 @@ export async function GET() {
         // Se cair aqui, o valor foi colado com aspas e está literalmente
         // com elas — o Zod rejeita, e ninguém desconfia olhando o painel.
         wrappedInQuotes: quoted,
+        // Compare com `npm run fingerprint` local: valores iguais = mesmo segredo.
+        fingerprints,
       },
       runtime: {
         node: process.version,

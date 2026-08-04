@@ -2,7 +2,7 @@
   "name": "disparei",
   "private": true,
   "version": "0.1.0",
-  "description": "Plataforma de outbound para prospecção ativa por e-mail",
+  "description": "Plataforma de outbound para prospec\u00e7\u00e3o ativa por e-mail",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -20,7 +20,8 @@
     "smoke": "tsx scripts/smoke.ts",
     "db:generate": "npm run generate --workspace=@disparei/db",
     "db:migrate": "npm run migrate --workspace=@disparei/db",
-    "db:studio": "npm run studio --workspace=@disparei/db"
+    "db:studio": "npm run studio --workspace=@disparei/db",
+    "fingerprint": "tsx scripts/fingerprint.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
