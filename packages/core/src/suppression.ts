@@ -1,4 +1,4 @@
-import { and, eq, or, sql, suppressions, enrollments, contacts } from '@disparei/db'
+import { and, eq, inArray, or, sql, suppressions, enrollments, contacts } from '@disparei/db'
 import type { Database } from '@disparei/db'
 import { emailDomain, normalizeEmail } from './email-validation'
 
@@ -56,10 +56,10 @@ export async function filterSuppressed(
     .where(
       and(
         eq(suppressions.workspaceId, workspaceId),
-        or(
-          sql`${suppressions.email} = any(${normalized})`,
-          sql`${suppressions.domain} = any(${domains})`,
-        ),
+        // `inArray` em vez de `= any(...)` em SQL cru: o Drizzle serializa o
+        // array JS como parâmetro escalar e o Postgres recusa com
+        // "op ANY/ALL (array) requires array on right side".
+        or(inArray(suppressions.email, normalized), inArray(suppressions.domain, domains)),
       ),
     )
 
