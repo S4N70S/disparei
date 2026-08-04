@@ -23,6 +23,7 @@ function SortableStep({
   index,
   projected,
   provider,
+  threadSubject,
   onEdit,
   onRemove,
   onWaitChange,
@@ -33,6 +34,7 @@ function SortableStep({
   index: number
   projected: string
   provider: 'resend' | 'smtp'
+  threadSubject: string
   onEdit: () => void
   onRemove: () => void
   onWaitChange: (days: number) => void
@@ -102,8 +104,14 @@ function SortableStep({
               {criticos === 0 && avisos > 0 && <Badge tone="amber">{avisos} aviso(s)</Badge>}
             </div>
             <p className="truncate text-sm">
-              {primeira?.subject || (
-                <span className="text-[var(--color-muted)]">(herda a thread com “Re:”)</span>
+              {index > 0 && step.sameThread ? (
+                <span className="text-[var(--color-muted)]">
+                  Re: {threadSubject || '(assunto do toque 1)'}
+                </span>
+              ) : (
+                primeira?.subject || (
+                  <span className="text-[var(--color-muted)]">(sem assunto)</span>
+                )
               )}
             </p>
             <p className="truncate text-xs text-[var(--color-muted)]">{previa || '(vazio)'}</p>
@@ -206,6 +214,7 @@ export function SequenceCanvas({ state, provider, library, onChange, onEdit }: P
               total={state.steps.length}
               provider={provider}
               projected={formatProjected(dates[i] ?? new Date(), state.sendWindow.timezone)}
+              threadSubject={state.steps[0]?.variants[0]?.subject ?? ''}
               onEdit={() => onEdit(step.key)}
               onRemove={() => onChange(state.steps.filter((s) => s.key !== step.key))}
               onWaitChange={(waitDays) => update(step.key, { waitDays })}

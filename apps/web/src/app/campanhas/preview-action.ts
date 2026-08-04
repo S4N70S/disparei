@@ -30,6 +30,14 @@ export type PreviewInput = {
   /** Índice do contato na lista, para percorrer exemplos diferentes. */
   contactOffset?: number
   provider?: 'resend' | 'smtp'
+  /**
+   * Assunto do primeiro toque, quando este passo encadeia na thread.
+   *
+   * Precisa chegar aqui porque no envio o assunto do follow-up é ignorado em
+   * favor de `Re: <assunto original>`. Se a prévia mostrasse o assunto
+   * digitado, ela mentiria sobre o que sai.
+   */
+  threadSubject?: string | null
 }
 
 export type PreviewResult = {
@@ -79,6 +87,7 @@ export async function previewStep(input: PreviewInput): Promise<PreviewResult> {
     context: contactToContext(exemplo),
     contactId: exemplo.id,
     stepId: 'preview',
+    threadSubject: input.threadSubject ?? null,
   })
 
   // O rodapé é concatenado no envio, fora do editor — a prévia precisa

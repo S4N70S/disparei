@@ -117,6 +117,30 @@ describe('renderStep', () => {
     const out = renderStep({ ...base, contactId: 'c-1', threadSubject: 'Proposta comercial' })
     expect(out.subject).toBe('Re: Proposta comercial')
   })
+
+  it('DESCARTA o assunto próprio quando encadeia na thread', () => {
+    // Contrato importante: com threadSubject presente, o subjectVariants do
+    // passo é ignorado por completo. A interface precisa refletir isso — um
+    // campo editável aqui faria o operador escrever texto que nunca sai.
+    const out = renderStep({
+      ...base,
+      subjectVariants: ['Assunto que não deve sair'],
+      contactId: 'c-1',
+      threadSubject: 'Proposta comercial',
+    })
+    expect(out.subject).toBe('Re: Proposta comercial')
+    expect(out.subject).not.toContain('não deve sair')
+  })
+
+  it('usa o assunto próprio quando NÃO encadeia', () => {
+    const out = renderStep({
+      ...base,
+      subjectVariants: ['Assunto próprio'],
+      contactId: 'c-1',
+      threadSubject: null,
+    })
+    expect(out.subject).toBe('Assunto próprio')
+  })
 })
 
 describe('withReplyPrefix', () => {

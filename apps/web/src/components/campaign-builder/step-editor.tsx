@@ -28,6 +28,7 @@ export function StepEditor({
   index,
   listId,
   provider,
+  threadSubject,
   onChange,
   onClose,
 }: {
@@ -35,6 +36,8 @@ export function StepEditor({
   index: number
   listId: string
   provider: 'resend' | 'smtp'
+  /** Assunto do primeiro toque — é o que o follow-up herda com "Re:". */
+  threadSubject: string
   onChange: (patch: Partial<BuilderStep>) => void
   onClose: () => void
 }) {
@@ -45,6 +48,13 @@ export function StepEditor({
 
   const atual = step.variants[variant] ?? step.variants[0]!
   const travado = step.locked
+
+  /*
+   * Encadeando, o motor descarta o assunto deste passo e usa
+   * `Re: <assunto do toque 1>`. O campo precisa refletir isso: deixá-lo
+   * editável faria o operador escrever um texto que nunca sai.
+   */
+  const encadeia = index > 0 && step.sameThread
 
   /*
    * Prévia com atraso: cada tecla dispararia uma chamada ao servidor.
@@ -61,6 +71,7 @@ export function StepEditor({
               listId,
               contactOffset: offset,
               provider,
+              threadSubject: encadeia ? threadSubject : null,
             }),
           )
         } catch {
@@ -69,7 +80,7 @@ export function StepEditor({
       })
     }, 400)
     return () => clearTimeout(timer)
-  }, [atual.subject, atual.blocks, listId, offset, provider])
+  }, [atual.subject, atual.blocks, listId, offset, provider, encadeia, threadSubject])
 
   const patchVariant = (patch: Partial<{ subject: string; blocks: Block[] }>) =>
     onChange({
@@ -157,23 +168,75 @@ export function StepEditor({
         <div className="grid gap-4 lg:grid-cols-2">
           {/* ---- Edição ---- */}
           <div className="space-y-3">
-            <div>
-              <label className="mb-1 block text-sm font-medium">
-                Assunto
-                {index > 0 && (
-                  <span className="ml-1 text-xs font-normal text-[var(--color-muted)]">
-                    — vazio herda a thread com “Re:”
+            {/* Como este toque aparece na caixa do prospect */}
+            {index > 0 && (
+              <div className="space-y-2 rounded-lg border border-[var(--color-border)] p-3">
+                <p className="text-sm font-medium">Como este toque chega</p>
+
+                <label className="flex items-start gap-2">
+                  <input
+                    type="radio"
+                    name={`thread-${step.key}`}
+                    checked={step.sameThread}
+                    disabled={travado}
+                    onChange={() => onChange({ sameThread: true })}
+                    className="mt-1"
+                  />
+                  <span className="text-sm">
+                    Continuar na mesma conversa
+                    <span className="block text-xs text-[var(--color-muted)]">
+                      Sai como <b>Re: {threadSubject || '(assunto do toque 1)'}</b>, agrupado na
+                      thread. É o que faz o follow-up parecer conversa em vez de e-mail novo — e é
+                      o maior ganho isolado de taxa de resposta.
+                    </span>
                   </span>
-                )}
-              </label>
-              <input
-                value={atual.subject}
-                disabled={travado}
-                onChange={(e) => patchVariant({ subject: e.target.value })}
-                placeholder={index === 0 ? '{Pergunta|Ideia} sobre {{company}}' : ''}
-                className={inputClass}
-              />
-              {!travado && (
+                </label>
+
+                <label className="flex items-start gap-2">
+                  <input
+                    type="radio"
+                    name={`thread-${step.key}`}
+                    checked={!step.sameThread}
+                    disabled={travado}
+                    onChange={() => onChange({ sameThread: false })}
+                    className="mt-1"
+                  />
+                  <span className="text-sm">
+                    Iniciar nova conversa
+                    <span className="block text-xs text-[var(--color-muted)]">
+                      Assunto próprio, thread separada. Útil para mudar de ângulo, mas perde o
+                      contexto do toque anterior na caixa do prospect.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">Assunto</label>
+
+              {encadeia ? (
+                // Editável aqui seria mentira: o motor descarta este valor.
+                <div className="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2">
+                  <p className="text-sm">
+                    Re: {threadSubject || <span className="text-[var(--color-muted)]">(defina o assunto no toque 1)</span>}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--color-muted)]">
+                    Herdado do primeiro toque. Para escrever um assunto próprio, escolha “Iniciar
+                    nova conversa” acima.
+                  </p>
+                </div>
+              ) : (
+                <input
+                  value={atual.subject}
+                  disabled={travado}
+                  onChange={(e) => patchVariant({ subject: e.target.value })}
+                  placeholder={index === 0 ? '{Pergunta|Ideia} sobre {{company}}' : 'Assunto próprio'}
+                  className={inputClass}
+                />
+              )}
+
+              {!travado && !encadeia && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {VARIAVEIS.map(([token, label]) => (
                     <button

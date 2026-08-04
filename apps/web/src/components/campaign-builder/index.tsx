@@ -307,6 +307,8 @@ export function CampaignBuilder({
           index={state.steps.findIndex((s) => s.key === stepEmEdicao.key)}
           listId={state.listId}
           provider={provider}
+          // Follow-up encadeado herda o assunto do primeiro toque.
+          threadSubject={state.steps[0]?.variants[0]?.subject ?? ''}
           onChange={(p) =>
             patch({
               steps: state.steps.map((s) => (s.key === stepEmEdicao.key ? { ...s, ...p } : s)),
