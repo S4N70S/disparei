@@ -263,10 +263,29 @@ export const campaignSteps = pgTable(
     position: integer('position').notNull(),
     /** Espera em DIAS ÚTEIS desde o passo anterior. 0 no primeiro passo. */
     waitDays: integer('wait_days').notNull().default(0),
+    /**
+     * HTML final, uma entrada por variante A/B.
+     *
+     * Continua sendo a fonte de verdade do ENVIO. Os blocos abaixo são só a
+     * representação editável — renderizada para cá ao salvar. Isso mantém o
+     * motor de envio intocado.
+     */
     subjectVariants: text('subject_variants').array().notNull(),
     bodyVariants: text('body_variants').array().notNull(),
     /** Se true, encadeia na thread do passo anterior (In-Reply-To/References). */
     sameThread: boolean('same_thread').notNull().default(true),
+    /** Nome do toque no builder: "Abertura", "Prova social". */
+    label: text('label'),
+    /** Papel estratégico, vindo da biblioteca de toques. */
+    purpose: text('purpose'),
+    /**
+     * `Block[][]` — uma lista de blocos por variante, espelhando bodyVariants.
+     * Nulo em campanha criada antes do builder; nesse caso o editor reconstrói
+     * a partir do HTML.
+     */
+    bodyBlocks: jsonb('body_blocks'),
+    /** Desativa o toque sem apagá-lo, preservando o histórico. */
+    enabled: boolean('enabled').notNull().default(true),
   },
   (t) => [uniqueIndex('campaign_steps_pos_uq').on(t.campaignId, t.position)],
 )

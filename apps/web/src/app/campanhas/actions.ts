@@ -1,7 +1,6 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import {
   and,
   campaignSteps,
@@ -10,96 +9,173 @@ import {
   db,
   enrollments,
   eq,
+  inArray,
   listContacts,
-  type SendWindow,
+  messages,
+  sql,
 } from '@disparei/db'
-import { DEFAULT_SEND_WINDOW, filterSuppressed, staggeredSendTimes } from '@disparei/core'
+import { filterSuppressed, renderBlocksToHtml, staggeredSendTimes } from '@disparei/core'
 import { requireWorkspace } from '@/lib/session'
+import { campaignDraftSchema, type CampaignDraft, type SaveResult } from './draft'
 
-function parseSendWindow(formData: FormData): SendWindow {
-  const days = formData.getAll('daysOfWeek').map(Number).filter(Number.isFinite)
-  const [startHour = 9] = [Number(formData.get('startHour'))].filter(Number.isFinite)
-  const [endHour = 17] = [Number(formData.get('endHour'))].filter(Number.isFinite)
+/**
+ * Passos que já produziram envio não podem ter o conteúdo alterado.
+ *
+ * Mudar o texto de um toque que já saiu corromperia a atribuição do teste
+ * A/B: as métricas continuariam somando na mesma variante, mas o texto seria
+ * outro — e você deixaria de saber qual copy gerou qual resultado.
+ */
+async function lockedStepIds(database: ReturnType<typeof db>, stepIds: string[]): Promise<Set<string>> {
+  if (stepIds.length === 0) return new Set()
 
+  const rows = await database
+    .selectDistinct({ stepId: messages.stepId })
+    .from(messages)
+    .where(inArray(messages.stepId, stepIds))
+
+  return new Set(rows.map((r) => r.stepId).filter((id): id is string => id !== null))
+}
+
+/** Blocos → HTML. O motor de envio continua consumindo só o HTML. */
+function toStepRow(step: CampaignDraft['steps'][number], position: number) {
   return {
-    daysOfWeek: days.length > 0 ? days : DEFAULT_SEND_WINDOW.daysOfWeek,
-    startMinute: startHour * 60,
-    endMinute: endHour * 60,
-    timezone: String(formData.get('timezone') || DEFAULT_SEND_WINDOW.timezone),
+    position,
+    // O primeiro toque sai imediatamente; os seguintes esperam em dias úteis.
+    waitDays: position === 0 ? 0 : step.waitDays,
+    subjectVariants: step.variants.map((v) => v.subject),
+    bodyVariants: step.variants.map((v) => renderBlocksToHtml(v.blocks)),
+    bodyBlocks: step.variants.map((v) => v.blocks),
+    sameThread: position > 0 && step.sameThread,
+    label: step.label,
+    purpose: step.purpose ?? null,
+    enabled: step.enabled,
   }
 }
 
-/** Extrai os passos do formulário: `step-0-subject`, `step-0-body`, `step-0-wait`. */
-function parseSteps(formData: FormData) {
-  const steps: Array<{ subject: string; body: string; waitDays: number }> = []
-
-  for (let i = 0; i < 12; i++) {
-    const subject = String(formData.get(`step-${i}-subject`) ?? '').trim()
-    const body = String(formData.get(`step-${i}-body`) ?? '').trim()
-    if (!body) continue
-
-    steps.push({
-      subject,
-      body,
-      waitDays: Math.max(0, Number(formData.get(`step-${i}-wait`) ?? 3) || 0),
-    })
-  }
-
-  return steps
-}
-
-export async function createCampaign(formData: FormData): Promise<void> {
+/**
+ * Cria ou atualiza uma campanha inteira a partir do rascunho do builder.
+ *
+ * Substitui o parsing de `step-N-campo` do FormData: o builder mantém a
+ * sequência como estado no cliente e envia JSON validado por Zod, o que
+ * permite reordenar, variantes A/B e blocos sem inventar convenção de nome
+ * de campo.
+ */
+export async function saveCampaign(input: unknown): Promise<SaveResult> {
   const workspace = await requireWorkspace()
   const database = db()
 
-  const name = String(formData.get('name') ?? '').trim()
-  const listId = String(formData.get('listId') ?? '')
-  const accountIds = formData.getAll('sendingAccountIds').map(String).filter(Boolean)
-  const steps = parseSteps(formData)
+  const parsed = campaignDraftSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Rascunho inválido' }
+  }
+  const draft = parsed.data
 
-  if (!name) throw new Error('Informe o nome da campanha')
-  if (!listId) throw new Error('Selecione uma lista')
-  if (accountIds.length === 0) throw new Error('Selecione ao menos uma caixa de envio')
-  if (steps.length === 0) throw new Error('Adicione ao menos um passo com corpo de e-mail')
-  if (!steps[0]?.subject) throw new Error('O primeiro passo precisa de assunto')
+  if (!draft.steps[0]?.variants[0]?.subject.trim()) {
+    return { ok: false, error: 'O primeiro toque precisa de assunto' }
+  }
 
-  const campaignId = await database.transaction(async (tx) => {
-    const [campaign] = await tx
-      .insert(campaigns)
-      .values({
-        workspaceId: workspace.id,
-        name,
-        listId,
-        status: 'draft',
-        sendWindow: parseSendWindow(formData),
-        sendingAccountIds: accountIds,
-        dailyCap: Math.max(1, Number(formData.get('dailyCap') ?? 100) || 100),
-      })
-      .returning({ id: campaigns.id })
+  const campaignValues = {
+    name: draft.name,
+    listId: draft.listId,
+    sendWindow: draft.sendWindow,
+    sendingAccountIds: draft.sendingAccountIds,
+    dailyCap: draft.dailyCap,
+  }
 
-    if (!campaign) throw new Error('Falha ao criar a campanha')
+  try {
+    const campaignId = await database.transaction(async (tx) => {
+      // ---- Criar --------------------------------------------------------
+      if (!draft.id) {
+        const [created] = await tx
+          .insert(campaigns)
+          .values({ workspaceId: workspace.id, status: 'draft', ...campaignValues })
+          .returning({ id: campaigns.id })
 
-    await tx.insert(campaignSteps).values(
-      steps.map((step, position) => ({
-        campaignId: campaign.id,
-        position,
-        // O primeiro passo sai imediatamente; os seguintes esperam em dias úteis.
-        waitDays: position === 0 ? 0 : step.waitDays,
-        // Variantes separadas por `---` viram opções de teste A/B.
-        subjectVariants: step.subject
-          ? step.subject.split('\n---\n').map((s) => s.trim()).filter(Boolean)
-          : [''],
-        bodyVariants: step.body.split('\n---\n').map((s) => s.trim()).filter(Boolean),
-        // Follow-up encadeado na thread do primeiro toque.
-        sameThread: position > 0,
-      })),
-    )
+        if (!created) throw new Error('Falha ao criar a campanha')
 
-    return campaign.id
-  })
+        await tx
+          .insert(campaignSteps)
+          .values(draft.steps.map((s, i) => ({ campaignId: created.id, ...toStepRow(s, i) })))
 
-  revalidatePath('/campanhas')
-  redirect(`/campanhas/${campaignId}`)
+        return created.id
+      }
+
+      // ---- Editar -------------------------------------------------------
+      const [existing] = await tx
+        .select({ id: campaigns.id })
+        .from(campaigns)
+        .where(and(eq(campaigns.id, draft.id), eq(campaigns.workspaceId, workspace.id)))
+        .limit(1)
+
+      if (!existing) throw new Error('Campanha não encontrada')
+
+      await tx.update(campaigns).set(campaignValues).where(eq(campaigns.id, draft.id))
+
+      const current = await tx
+        .select({ id: campaignSteps.id })
+        .from(campaignSteps)
+        .where(eq(campaignSteps.campaignId, draft.id))
+
+      const locked = await lockedStepIds(database, current.map((s) => s.id))
+      const keptIds = new Set(draft.steps.map((s) => s.id).filter(Boolean) as string[])
+
+      for (const id of locked) {
+        if (!keptIds.has(id)) {
+          throw new Error('Um toque que já foi enviado não pode ser removido')
+        }
+      }
+
+      // Apaga só os passos não travados que saíram do rascunho.
+      const toDelete = current.filter((s) => !keptIds.has(s.id) && !locked.has(s.id))
+      if (toDelete.length > 0) {
+        await tx.delete(campaignSteps).where(inArray(campaignSteps.id, toDelete.map((s) => s.id)))
+      }
+
+      /*
+       * Posições saem do caminho antes de receberem o valor final.
+       *
+       * Há índice único em (campaign_id, position). Trocar dois toques de
+       * lugar atualizando um por vez colidiria: mover A para a posição de B
+       * enquanto B ainda está lá viola a restrição. Um índice único não pode
+       * ser adiado no Postgres, então a saída é deslocar todo mundo para uma
+       * faixa livre e depois assentar.
+       */
+      const keptExisting = draft.steps.filter((s) => s.id).map((s) => s.id!)
+      if (keptExisting.length > 0) {
+        await tx
+          .update(campaignSteps)
+          .set({ position: sql`${campaignSteps.position} + 1000` })
+          .where(inArray(campaignSteps.id, keptExisting))
+      }
+
+      for (const [i, step] of draft.steps.entries()) {
+        const row = toStepRow(step, i)
+
+        if (step.id && locked.has(step.id)) {
+          // Travado: só posição e intervalo mudam. Conteúdo fica como saiu.
+          await tx
+            .update(campaignSteps)
+            .set({ position: row.position, waitDays: row.waitDays, enabled: row.enabled })
+            .where(eq(campaignSteps.id, step.id))
+          continue
+        }
+
+        if (step.id) {
+          await tx.update(campaignSteps).set(row).where(eq(campaignSteps.id, step.id))
+        } else {
+          await tx.insert(campaignSteps).values({ campaignId: draft.id, ...row })
+        }
+      }
+
+      return draft.id
+    })
+
+    revalidatePath('/campanhas')
+    revalidatePath(`/campanhas/${campaignId}`)
+    return { ok: true, campaignId }
+  } catch (error) {
+    return { ok: false, error: (error as Error).message }
+  }
 }
 
 /**

@@ -1,19 +1,48 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "preserve",
     "allowJs": true,
     "incremental": true,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "@disparei/db": ["../../packages/db/src/index.ts"],
-      "@disparei/core": ["../../packages/core/src/index.ts"],
-      "@disparei/email": ["../../packages/email/src/index.ts"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@disparei/db": [
+        "../../packages/db/src/index.ts"
+      ],
+      "@disparei/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@disparei/email": [
+        "../../packages/email/src/index.ts"
+      ],
+      "@disparei/core/*": [
+        "../../packages/core/src/*"
+      ],
+      "@disparei/db/*": [
+        "../../packages/db/src/*"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

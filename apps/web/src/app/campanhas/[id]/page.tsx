@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { and, campaignSteps, campaigns, db, eq, sql, enrollments, asc } from '@disparei/db'
 import {
@@ -63,6 +64,12 @@ export default async function CampanhaPage({ params }: { params: Promise<{ id: s
         description={`${steps.length} passos · janela ${hhmm(window.startMinute)}–${hhmm(window.endMinute)} (${window.timezone}) · teto ${campaign.dailyCap}/dia`}
         action={
           <div className="flex items-center gap-2">
+            <Link
+              href={`/campanhas/${campaign.id}/editar`}
+              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm font-medium transition hover:bg-[var(--color-bg)]"
+            >
+              Editar
+            </Link>
             <Badge
               tone={
                 campaign.status === 'active'
