@@ -7,9 +7,29 @@ import {
   isNotNull,
   messages,
   replies,
+  sendingAccounts,
   sql,
   type Database,
 } from '@disparei/db'
+
+/**
+ * O que este canal consegue medir.
+ *
+ * `full` — envio via API do Resend, que devolve webhooks de entrega,
+ * abertura, clique, bounce e reclamação.
+ *
+ * `send_only` — envio por SMTP direto. O servidor do destinatário aceita a
+ * mensagem e a conversa acaba ali: **não existe confirmação de entrega em
+ * SMTP**. Abertura e clique também não, porque não há domínio de tracking
+ * nesse caminho, e o bounce assíncrono volta como mensagem para a caixa do
+ * remetente, fora do alcance da plataforma.
+ *
+ * A distinção existe para o painel poder dizer "não sei" em vez de "zero".
+ * Mostrar 0,0% de bounce numa campanha SMTP é pior do que não mostrar nada:
+ * parece medição, é ausência de dado, e desliga em silêncio o alerta que
+ * protege a reputação do domínio.
+ */
+export type TrackingMode = 'full' | 'send_only'
 
 export type FunnelCounts = {
   sent: number
@@ -18,21 +38,29 @@ export type FunnelCounts = {
   clicked: number
   bounced: number
   complained: number
+  /** Recusa síncrona no envio. Mensurável nos dois canais. */
+  failed: number
   replied: number
   positiveReplies: number
   unsubscribed: number
+  /** Deriva o modo a partir do que foi realmente enviado. */
+  sentViaSmtp: number
 }
 
+/** `null` = não mensurável neste canal. Nunca confundir com zero. */
 export type FunnelRates = {
-  deliveryRate: number
-  bounceRate: number
-  complaintRate: number
-  openRate: number
-  clickRate: number
+  deliveryRate: number | null
+  bounceRate: number | null
+  complaintRate: number | null
+  openRate: number | null
+  clickRate: number | null
+  /** Falha na entrega ao servidor. Sempre mensurável. */
+  failureRate: number
   /** A métrica que importa. Tudo acima existe para sustentar esta. */
   replyRate: number
   positiveReplyRate: number
   unsubscribeRate: number
+  mode: TrackingMode
 }
 
 /** Limites operacionais do Resend: acima deles a conta é suspensa sem aviso. */
@@ -42,6 +70,12 @@ export const COMPLAINT_RATE_LIMIT = 0.0008
 const ratio = (numerator: number, denominator: number): number =>
   denominator === 0 ? 0 : numerator / denominator
 
+export function trackingModeOf(counts: Pick<FunnelCounts, 'sentViaSmtp'>): TrackingMode {
+  // Basta uma mensagem por SMTP para o número de entregues deixar de ser
+  // comparável — melhor tratar a campanha inteira como não rastreável.
+  return counts.sentViaSmtp > 0 ? 'send_only' : 'full'
+}
+
 /**
  * Bounce e reclamação são calculados sobre ENVIADOS, não sobre entregues.
  *
@@ -49,18 +83,26 @@ const ratio = (numerator: number, denominator: number): number =>
  * bounces do cálculo e faz a taxa parecer menor do que o provedor enxerga.
  * Como é essa taxa que dispara a suspensão da conta, ela precisa bater com a
  * régua do provedor, não com a que nos favorece.
+ *
+ * Em `send_only`, o denominador de resposta passa a ser ENVIADOS. Sobre
+ * entregues seria divisão por zero, e a taxa de resposta — o número que
+ * decide a operação — apareceria como 0% mesmo com respostas chegando.
  */
 export function computeRates(c: FunnelCounts): FunnelRates {
+  const mode = trackingModeOf(c)
+  const base = mode === 'full' ? c.delivered : c.sent
+
   return {
-    deliveryRate: ratio(c.delivered, c.sent),
-    bounceRate: ratio(c.bounced, c.sent),
-    complaintRate: ratio(c.complained, c.sent),
-    // Aberturas e cliques sobre entregues — quem não recebeu não podia abrir.
-    openRate: ratio(c.opened, c.delivered),
-    clickRate: ratio(c.clicked, c.delivered),
-    replyRate: ratio(c.replied, c.delivered),
-    positiveReplyRate: ratio(c.positiveReplies, c.delivered),
-    unsubscribeRate: ratio(c.unsubscribed, c.delivered),
+    mode,
+    deliveryRate: mode === 'full' ? ratio(c.delivered, c.sent) : null,
+    bounceRate: mode === 'full' ? ratio(c.bounced, c.sent) : null,
+    complaintRate: mode === 'full' ? ratio(c.complained, c.sent) : null,
+    openRate: mode === 'full' ? ratio(c.opened, c.delivered) : null,
+    clickRate: mode === 'full' ? ratio(c.clicked, c.delivered) : null,
+    failureRate: ratio(c.failed, c.sent + c.failed),
+    replyRate: ratio(c.replied, base),
+    positiveReplyRate: ratio(c.positiveReplies, base),
+    unsubscribeRate: ratio(c.unsubscribed, base),
   }
 }
 
@@ -71,6 +113,8 @@ export type HealthCheck = {
   bounce: HealthLevel
   complaint: HealthLevel
   messages: string[]
+  /** Avisos sobre o que este canal NÃO consegue medir. */
+  blindSpots: string[]
 }
 
 /**
@@ -83,10 +127,34 @@ export type HealthCheck = {
  */
 export function checkHealth(counts: FunnelCounts, rates: FunnelRates): HealthCheck {
   const messagesOut: string[] = []
+  const blindSpots: string[] = []
   const MIN_VOLUME = 50
 
+  /*
+   * O ponto cego é reportado SEMPRE, inclusive com volume baixo.
+   *
+   * Em SMTP o bounce assíncrono não chega até aqui, então este semáforo não
+   * pode protegê-lo. Silenciar isso seria o pior desfecho possível: um painel
+   * verde que não está medindo nada.
+   */
+  if (rates.mode === 'send_only') {
+    blindSpots.push(
+      'Envio por SMTP não gera confirmação de entrega, abertura, clique nem bounce assíncrono. As devoluções chegam na caixa do remetente — acompanhe o Gmail da conta de envio.',
+    )
+    if (counts.failed > 0) {
+      blindSpots.push(
+        `${counts.failed} envio(s) recusado(s) pelo servidor no ato. Veja o erro em cada mensagem.`,
+      )
+    }
+  }
+
   if (counts.sent < MIN_VOLUME) {
-    return { level: 'ok', bounce: 'ok', complaint: 'ok', messages: [] }
+    return { level: 'ok', bounce: 'ok', complaint: 'ok', messages: [], blindSpots }
+  }
+
+  // Sem dado de bounce não há semáforo a dar — só o ponto cego acima.
+  if (rates.bounceRate === null || rates.complaintRate === null) {
+    return { level: 'ok', bounce: 'ok', complaint: 'ok', messages: [], blindSpots }
   }
 
   const grade = (rate: number, limit: number): HealthLevel => {
@@ -125,11 +193,18 @@ export function checkHealth(counts: FunnelCounts, rates: FunnelRates): HealthChe
         ? 'warning'
         : 'ok'
 
-  return { level: worst, bounce, complaint, messages: messagesOut }
+  return { level: worst, bounce, complaint, messages: messagesOut, blindSpots }
 }
 
-export function formatPercent(value: number, digits = 1): string {
+/** `null` vira "—": o painel diz que não sabe, em vez de fingir zero. */
+export function formatPercent(value: number | null, digits = 1): string {
+  if (value === null) return '—'
   return `${(value * 100).toFixed(digits)}%`
+}
+
+/** Rótulo do denominador, para o painel não mentir sobre o que foi medido. */
+export function baseLabel(mode: TrackingMode): string {
+  return mode === 'full' ? 'entregues' : 'enviados'
 }
 
 // ---------------------------------------------------------------------------
@@ -153,10 +228,20 @@ export async function loadFunnel(
       clicked: sql<number>`count(*) filter (where ${messages.clickedAt} is not null)::int`,
       bounced: sql<number>`count(*) filter (where ${messages.bouncedAt} is not null)::int`,
       complained: sql<number>`count(*) filter (where ${messages.complainedAt} is not null)::int`,
+      failed: sql<number>`count(*) filter (where ${messages.status} = 'failed')::int`,
+      /*
+       * Quantas saíram por SMTP.
+       *
+       * Deriva o modo de rastreio do que REALMENTE aconteceu, e não da
+       * configuração atual da campanha — trocar a caixa de envio depois não
+       * deve reescrever a leitura do histórico.
+       */
+      sentViaSmtp: sql<number>`count(*) filter (where ${sendingAccounts.provider} = 'smtp' and ${messages.sentAt} is not null)::int`,
     })
     .from(messages)
     .innerJoin(enrollments, eq(messages.enrollmentId, enrollments.id))
     .innerJoin(campaigns, eq(enrollments.campaignId, campaigns.id))
+    .leftJoin(sendingAccounts, eq(messages.sendingAccountId, sendingAccounts.id))
     .where(scope)
 
   const enrollmentScope = campaignId
@@ -188,6 +273,8 @@ export async function loadFunnel(
     clicked: row?.clicked ?? 0,
     bounced: row?.bounced ?? 0,
     complained: row?.complained ?? 0,
+    failed: row?.failed ?? 0,
+    sentViaSmtp: row?.sentViaSmtp ?? 0,
     replied: enrollmentRow?.replied ?? 0,
     positiveReplies: positiveRow?.positive ?? 0,
     unsubscribed: enrollmentRow?.unsubscribed ?? 0,
@@ -197,8 +284,10 @@ export async function loadFunnel(
 export type StepPerformance = {
   stepPosition: number
   sent: number
-  delivered: number
+  /** `null` quando o canal não confirma entrega (SMTP). */
+  delivered: number | null
   replied: number
+  /** Sobre entregues no caminho Resend, sobre enviados no SMTP. */
   replyRate: number
 }
 
@@ -221,9 +310,11 @@ export async function loadStepPerformance(
       sent: count(messages.sentAt),
       delivered: sql<number>`count(*) filter (where ${messages.deliveredAt} is not null)::int`,
       replied: sql<number>`count(distinct ${replies.enrollmentId})::int`,
+      sentViaSmtp: sql<number>`count(*) filter (where ${sendingAccounts.provider} = 'smtp' and ${messages.sentAt} is not null)::int`,
     })
     .from(messages)
     .innerJoin(enrollments, eq(messages.enrollmentId, enrollments.id))
+    .leftJoin(sendingAccounts, eq(messages.sendingAccountId, sendingAccounts.id))
     .leftJoin(
       replies,
       and(
@@ -235,13 +326,17 @@ export async function loadStepPerformance(
     .groupBy(messages.stepPosition)
     .orderBy(messages.stepPosition)
 
-  return rows.map((r) => ({
-    stepPosition: r.stepPosition,
-    sent: r.sent,
-    delivered: r.delivered,
-    replied: r.replied,
-    replyRate: ratio(r.replied, r.delivered),
-  }))
+  return rows.map((r) => {
+    const smtp = r.sentViaSmtp > 0
+    return {
+      stepPosition: r.stepPosition,
+      sent: r.sent,
+      delivered: smtp ? null : r.delivered,
+      replied: r.replied,
+      // Sem confirmação de entrega, o denominador honesto é o que saiu.
+      replyRate: ratio(r.replied, smtp ? r.sent : r.delivered),
+    }
+  })
 }
 
 export type VariantPerformance = {

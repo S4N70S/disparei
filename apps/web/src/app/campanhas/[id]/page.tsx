@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { and, campaignSteps, campaigns, db, eq, sql, enrollments, asc } from '@disparei/db'
 import {
+  baseLabel,
   checkHealth,
   computeRates,
   formatPercent,
@@ -96,6 +97,17 @@ export default async function CampanhaPage({ params }: { params: Promise<{ id: s
         }
       />
 
+      {health.blindSpots.length > 0 && (
+        <Card className="mb-4 p-4">
+          <p className="mb-1 text-sm font-semibold">O que este canal não mede</p>
+          {health.blindSpots.map((b) => (
+            <p key={b} className="text-sm text-[var(--color-muted)]">
+              {b}
+            </p>
+          ))}
+        </Card>
+      )}
+
       {health.messages.length > 0 && (
         <Card
           className={`mb-6 p-4 ${health.level === 'critical' ? 'border-red-500/50' : 'border-amber-500/50'}`}
@@ -112,12 +124,20 @@ export default async function CampanhaPage({ params }: { params: Promise<{ id: s
         <Stat
           label="Taxa de resposta"
           value={formatPercent(rates.replyRate)}
-          hint={`${funnel.replied} respostas`}
+          hint={`${funnel.replied} de ${rates.mode === 'full' ? funnel.delivered : funnel.sent} ${baseLabel(rates.mode)}`}
           emphasis
         />
         <Stat label="Em cadência" value={String(enrollmentStats?.active ?? 0)} />
-        <Stat label="Enviados" value={String(funnel.sent)} />
-        <Stat label="Bounce" value={formatPercent(rates.bounceRate)} hint="limite 4%" />
+        <Stat
+          label="Enviados"
+          value={String(funnel.sent)}
+          hint={funnel.failed > 0 ? `${funnel.failed} recusado(s) no envio` : undefined}
+        />
+        <Stat
+          label="Bounce"
+          value={formatPercent(rates.bounceRate)}
+          hint={rates.bounceRate === null ? 'não rastreável em SMTP' : 'limite 4%'}
+        />
       </section>
 
       {(enrollmentStats?.total ?? 0) === 0 && (
@@ -158,7 +178,9 @@ export default async function CampanhaPage({ params }: { params: Promise<{ id: s
                   <tr key={s.stepPosition}>
                     <td className="p-3 font-medium">{s.stepPosition + 1}</td>
                     <td className="p-3 tabular-nums">{s.sent}</td>
-                    <td className="p-3 tabular-nums">{s.delivered}</td>
+                    <td className="p-3 tabular-nums">
+                      {s.delivered ?? <span className="text-[var(--color-muted)]">—</span>}
+                    </td>
                     <td className="p-3 tabular-nums">{s.replied}</td>
                     <td className="p-3 tabular-nums">{formatPercent(s.replyRate)}</td>
                   </tr>

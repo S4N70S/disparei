@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { and, campaigns, count, db, desc, enrollments, eq, replies, sql } from '@disparei/db'
-import { checkHealth, computeRates, formatPercent, loadFunnel } from '@disparei/core'
+import { baseLabel, checkHealth, computeRates, formatPercent, loadFunnel } from '@disparei/core'
 import { Badge, Card, Empty, PageHeader, Stat } from '@/components/ui'
 import { requireWorkspace } from '@/lib/session'
 
@@ -42,6 +42,17 @@ export default async function DashboardPage() {
         description="A métrica que decide uma operação de outbound é a taxa de resposta. Abertura serve de contexto, não de meta."
       />
 
+      {health.blindSpots.length > 0 && (
+        <Card className="mb-4 p-4">
+          <p className="mb-1 text-sm font-semibold">O que este canal não mede</p>
+          {health.blindSpots.map((b) => (
+            <p key={b} className="text-sm text-[var(--color-muted)]">
+              {b}
+            </p>
+          ))}
+        </Card>
+      )}
+
       {health.messages.length > 0 && (
         <Card
           className={`mb-6 p-4 ${health.level === 'critical' ? 'border-red-500/50' : 'border-amber-500/50'}`}
@@ -63,19 +74,29 @@ export default async function DashboardPage() {
         <Stat
           label="Taxa de resposta"
           value={formatPercent(rates.replyRate)}
-          hint={`${funnel.replied} de ${funnel.delivered} entregues`}
+          hint={`${funnel.replied} de ${rates.mode === 'full' ? funnel.delivered : funnel.sent} ${baseLabel(rates.mode)}`}
           emphasis
         />
         <Stat
           label="Respostas positivas"
           value={String(funnel.positiveReplies)}
-          hint={formatPercent(rates.positiveReplyRate) + ' dos entregues'}
+          hint={`${formatPercent(rates.positiveReplyRate)} dos ${baseLabel(rates.mode)}`}
         />
-        <Stat label="Enviados" value={String(funnel.sent)} hint={`${funnel.delivered} entregues`} />
+        <Stat
+          label="Enviados"
+          value={String(funnel.sent)}
+          hint={
+            rates.mode === 'full'
+              ? `${funnel.delivered} entregues`
+              : funnel.failed > 0
+                ? `${funnel.failed} recusado(s) no envio`
+                : 'entrega não confirmável em SMTP'
+          }
+        />
         <Stat
           label="Bounce"
           value={formatPercent(rates.bounceRate)}
-          hint="limite do provedor: 4%"
+          hint={rates.bounceRate === null ? 'não rastreável em SMTP' : 'limite do provedor: 4%'}
         />
       </section>
 
@@ -83,13 +104,19 @@ export default async function DashboardPage() {
         <Stat
           label="Abertura"
           value={formatPercent(rates.openRate)}
-          hint="inflada pelo Apple MPP — use como contexto"
+          hint={
+            rates.openRate === null
+              ? 'sem tracking em SMTP'
+              : 'inflada pelo Apple MPP — use como contexto'
+          }
         />
         <Stat label="Cliques" value={formatPercent(rates.clickRate)} />
         <Stat
           label="Reclamações"
           value={formatPercent(rates.complaintRate, 2)}
-          hint="limite do provedor: 0,08%"
+          hint={
+            rates.complaintRate === null ? 'não rastreável em SMTP' : 'limite do provedor: 0,08%'
+          }
         />
         <Stat label="Descadastros" value={formatPercent(rates.unsubscribeRate)} />
       </section>
